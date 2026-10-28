@@ -1,0 +1,124 @@
+name: build
+# Builds the game's Rust binaries on GitHub-hosted runners and uploads them as artifacts.
+# No vanilla Minecraft data is needed to compile: the exporters (Java classes) and `.local/` resources are
+# produced at runtime by horizon-prepare from the player's own copy of Minecraft: Java Edition 26.3.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HORIZON_TELEMETRY_URL: "off"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-latest
+            exe: ""
+            rustflags: ""
+          - name: windows
+            os: windows-latest
+            exe: ".exe"
+            rustflags: "-C target-feature=+crt-static"
+          - name: macos
+            os: macos-latest
+            exe: ""
+            rustflags: ""
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: System headers (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: build-${{ matrix.name }}
+
+      - name: Check formatting
+        run: cargo +stable fmt --all -- --check
+
+      - name: Clippy (default features)
+        run: cargo +stable clippy --workspace --all-targets -- -D warnings
+
+      - name: Clippy (server build, no audio/controllers)
+        run: cargo +stable clippy -p horizon-client --all-targets --no-default-features -- -D warnings
+
+      - name: Build binaries
+        run: |
+          cargo build --release --locked --features horizon-client/mods \
+            -p horizon-client --bin horizon-client --bin horizon-ctl \
+            -p horizon-prepare --bin horizon-prepare \
+            -p horizon-server --bin horizon-server
+
+      - name: Verify binaries start
+        run: |
+          set -euo pipefail
+          bin=target/release
+          "$bin/horizon-client${{ matrix.exe }}" --help | grep -q -- '--resources'
+          "$bin/horizon-ctl${{ matrix.exe }}" --help > /dev/null
+          "$bin/horizon-prepare${{ matrix.exe }}" --help | grep -q -- '--minecraft-dir'
+          echo "horizon-server: $("$bin/horizon-server${{ matrix.exe }}" --version)"
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: horizon-${{ matrix.name }}
+          path: |
+            target/release/horizon-client${{ matrix.exe }}
+            target/release/horizon-ctl${{ matrix.exe }}
+            target/release/horizon-prepare${{ matrix.exe }}
+            target/release/horizon-server${{ matrix.exe }}
+          if-no-files-found: error
+          retention-days: 14
+
+  test:
+    name: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: System headers
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+      - name: Python tests
+        run: python -m unittest discover -s tests -v
+      - name: Public tree check
+        run: python tools/check_public_tree.py
+      - name: Rust tests
+        run: cargo +stable test --workspace --lib --bins --tests --features horizon-client/mods,horizon-mods/pack
