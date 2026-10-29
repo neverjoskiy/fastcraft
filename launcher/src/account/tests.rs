@@ -332,25 +332,16 @@ fn an_owner_plays_with_a_session() {
 }
 
 #[test]
-fn a_no_from_the_services_blocks_at_once() {
+fn a_non_owner_still_plays_offline_in_this_fork() {
     let (_, ep) = mock(|m| m.owns_game = false);
     let store = MemoryStore::default();
     let mut accounts = signed_in(&store, &secrets("mc-token", true));
-    assert!(accounts.has_owner(&store));
-    assert_eq!(
-        launch(&ep, Some("test-client"), &store, &mut accounts).unwrap_err(),
-        NoOwner
-    );
-    // The answer is kept beside the tokens: offline now, it still says no.
-    assert!(!kept(&store).owns && !accounts.has_owner(&store));
-    assert_eq!(
-        launch(&offline(), Some("test-client"), &store, &mut accounts).unwrap_err(),
-        NoOwner
-    );
-    assert_eq!(
-        NoOwner.to_string(),
-        "Sign in with a Microsoft account that owns Minecraft: Java Edition to play."
-    );
+    let pass = launch(&ep, Some("test-client"), &store, &mut accounts).unwrap();
+    assert!(pass.session.is_none());
+    // The answer is kept beside the tokens: it still says no.
+    assert!(!kept(&store).owns);
+    let pass = launch(&offline(), Some("test-client"), &store, &mut accounts).unwrap();
+    assert!(pass.session.is_none());
 }
 
 #[test]
@@ -406,8 +397,8 @@ fn any_owner_opens_the_gate_and_the_one_who_plays_brings_the_session() {
     let pass = launch(&ep, Some("test-client"), &store, &mut accounts).unwrap();
     assert!(pass.session.is_none() && pass.offline.is_none());
     assert_eq!(m.lock().unwrap().log.len(), 2);
-    // No account at all.
-    assert!(launch(&ep, Some("test-client"), &store, &mut Accounts::default()).is_err());
+    // No account at all still plays (no license needed in this fork).
+    assert!(launch(&ep, Some("test-client"), &store, &mut Accounts::default()).is_ok());
 }
 
 #[test]
@@ -425,12 +416,12 @@ fn offline_names_play_only_beside_an_owner() {
     accounts.remove(&store, UUID).unwrap();
     assert_eq!(accounts.offline, ["Builder_1"]);
     assert_eq!(accounts.player(), Player::Offline("Builder_1".into()));
-    assert!(!accounts.has_owner(&store));
+    assert!(accounts.has_owner(&store));
     let (_, ep) = mock(|_| {});
-    assert!(launch(&ep, Some("test-client"), &store, &mut accounts).is_err());
+    assert!(launch(&ep, Some("test-client"), &store, &mut accounts).is_ok());
     assert!(accounts
         .play_as(&store, Player::Offline("Builder_2".into()))
-        .is_err());
+        .is_ok());
 }
 
 #[test]

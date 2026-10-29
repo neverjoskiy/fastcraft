@@ -851,10 +851,11 @@ impl Accounts {
     }
     /// Whether an account here owned the game at its last check (the keychain's answer, no
     /// request): what Play and offline names need.
-    pub fn has_owner(&self, store: &dyn SecretStore) -> bool {
-        self.accounts
-            .iter()
-            .any(|a| secrets_in(store, &a.uuid).is_some_and(|s| s.owns))
+    ///
+    /// This fork runs without a Minecraft license, so Play never waits for an owner: every
+    /// account (and no account at all) counts as one.
+    pub fn has_owner(&self, _store: &dyn SecretStore) -> bool {
+        true
     }
 
     /// Who plays now.
@@ -877,9 +878,7 @@ impl Accounts {
                 self.selected = Some(uuid);
             }
             Player::Offline(name) => {
-                if !self.has_owner(store) {
-                    return Err(OFFLINE_NEEDS_OWNER.into());
-                }
+                // This fork runs without a Minecraft license, so offline names play on their own.
                 let name = self.add_offline(&name)?;
                 self.selected = None;
                 self.offline_selected = Some(name);
@@ -1045,11 +1044,11 @@ pub fn launch(
             }
         }
     }
-    if owned {
-        Ok(pass)
-    } else {
-        Err(NoOwner)
-    }
+    // This fork ships without the Minecraft ownership gate: the game runs offline (with an
+    // offline name or the name it makes up) even when no Microsoft account owns it, so Play
+    // never blocks on a license.
+    let _ = owned;
+    Ok(pass)
 }
 
 /// Write the session for the game, readable by this user only, in a fresh file it deletes
