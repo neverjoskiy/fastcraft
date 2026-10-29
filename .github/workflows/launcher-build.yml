@@ -1,0 +1,109 @@
+name: launcher-build
+# Builds the GPUI launcher (launcher/) on GitHub-hosted runners and uploads it as an artifact.
+# Unlike launcher.yml, this never decides, signs or publishes a release: it is the plain
+# "does it compile and start" build, mirroring build.yml for the game.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'launcher/**'
+      - 'crates/horizon-bench/**'
+      - 'crates/horizon-friends/**'
+      - 'crates/horizon-mods/**'
+      - 'crates/horizon-port-pack/**'
+      - 'crates/horizon-prepare/**'
+      - 'crates/horizon-release-sign/**'
+      - 'crates/horizon-telemetry/**'
+      - 'crates/horizon-theme/**'
+      - '.github/workflows/launcher-build.yml'
+  pull_request:
+    paths:
+      - 'launcher/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: launcher-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HORIZON_TELEMETRY_URL: "off"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-latest
+            asset: horizon-launcher-linux-x86_64.tar.gz
+            binary: horizon-launcher
+            rustflags: ""
+          - name: macos
+            os: macos-latest
+            asset: horizon-launcher-macos-arm64.zip
+            binary: horizon-launcher
+            rustflags: ""
+          - name: windows
+            os: windows-latest
+            asset: horizon-launcher-windows-x64.zip
+            binary: horizon-launcher.exe
+            rustflags: "-C target-feature=+crt-static"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+    defaults:
+      run:
+        working-directory: launcher
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        if: runner.environment == 'github-hosted'
+        with:
+          workspaces: launcher
+          shared-key: launcher-build-${{ matrix.name }}
+
+      - name: Linux libraries GPUI links to
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libvulkan-dev libasound2-dev
+
+      - name: Test
+        run: cargo test --release --locked
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Verify binary starts
+        run: |
+          set -euo pipefail
+          out=$(target/release/${{ matrix.binary }} --version)
+          echo "$out"
+          test -n "$out"
+
+      - name: Package
+        run: |
+          rm -rf dist out && mkdir -p out dist
+          cp target/release/${{ matrix.binary }} dist/
+          if [[ "${{ matrix.asset }}" == *.tar.gz ]]; then
+            (cd dist && tar czf ../out/${{ matrix.asset }} ${{ matrix.binary }})
+          else
+            (cd dist && 7z a ../out/${{ matrix.asset }} ${{ matrix.binary }})
+          fi
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: horizon-launcher-${{ matrix.name }}
+          path: launcher/out/*
+          retention-days: 14
