@@ -111,6 +111,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
       - name: System headers
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
       - uses: Swatinem/rust-cache@v2
