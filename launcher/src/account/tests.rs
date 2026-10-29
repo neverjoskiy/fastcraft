@@ -360,9 +360,9 @@ fn no_network_never_blocks_a_past_owner() {
     let mut accounts = signed_in(&store, &stale);
     assert!(launch(&offline(), Some("test-client"), &store, &mut accounts).is_ok());
     assert!(launch(&offline(), None, &store, &mut accounts).is_ok());
-    // An account that never passed doesn't pass offline.
+    // An account that never passed still plays offline in this fork.
     let mut accounts = signed_in(&store, &secrets("mc-token", false));
-    assert!(launch(&offline(), Some("test-client"), &store, &mut accounts).is_err());
+    assert!(launch(&offline(), Some("test-client"), &store, &mut accounts).is_ok());
 }
 
 #[test]
@@ -402,12 +402,12 @@ fn any_owner_opens_the_gate_and_the_one_who_plays_brings_the_session() {
 }
 
 #[test]
-fn offline_names_play_only_beside_an_owner() {
+fn offline_names_play_without_an_owner_in_this_fork() {
     let store = MemoryStore::default();
     let mut accounts = Accounts::default();
-    let refused = accounts.play_as(&store, Player::Offline("Builder_1".into()));
-    assert_eq!(refused.unwrap_err(), OFFLINE_NEEDS_OWNER);
-    assert!(accounts.offline.is_empty());
+    // Offline names now play even without a Microsoft account (no license needed).
+    accounts.play_as(&store, Player::Offline("Builder_1".into())).unwrap();
+    assert_eq!(accounts.offline, ["Builder_1"]);
     let mut accounts = signed_in(&store, &secrets("mc-token", true));
     accounts
         .play_as(&store, Player::Offline("Builder_1".into()))
